@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Resonance Runner — 432 Hz Endless Runner | AnchorWithin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0A0B10;overflow:hidden;touch-action:none;font-family:'Segoe UI',system-ui,sans-serif;user-select:none}
+canvas{display:block}
+
+/* ── UI Overlays ── */
+.overlay{
+  position:fixed;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  background:rgba(10,11,16,.92);z-index:10;
+  transition:opacity .4s;
+}
+.overlay.hidden{opacity:0;pointer-events:none}
+
+.title{font-size:clamp(2rem,8vw,3.5rem);font-weight:800;color:#E8E4DD;letter-spacing:-1px;text-align:center;line-height:1.1}
+.title .glow{color:#62F0B2}
+.sub{color:#8A877F;font-size:clamp(.8rem,2.5vw,1rem);margin-top:8px;text-align:center}
+
+.mbtn{
+  margin-top:24px;padding:16px 48px;
+  background:#62F0B2;color:#0A0B10;
+  border:none;border-radius:12px;
+  font-size:1.1rem;font-weight:700;
+  cursor:pointer;transition:all .2s;
+  -webkit-tap-highlight-color:transparent;
+}
+.mbtn:hover{background:#80FFD0;transform:scale(1.03)}
+.mbtn.secondary{background:transparent;border:2px solid #62F0B2;color:#62F0B2;font-size:.9rem;padding:12px 32px;margin-top:12px}
+
+.hud{
+  position:fixed;top:0;left:0;right:0;
+  display:flex;justify-content:space-between;
+  padding:14px 18px;z-index:5;pointer-events:none;
+}
+.hud-item{
+  background:rgba(10,11,16,.7);
+  backdrop-filter:blur(8px);
+  border:1px solid rgba(255,255,255,.06);
+  border-radius:10px;padding:8px 14px;
+  pointer-events:auto;
+}
+.hud-label{font-size:.55rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#62F0B2}
+.hud-val{font-size:1.1rem;font-weight:800;color:#E8E4DD;font-variant-numeric:tabular-nums}
+
+.stats-row{display:flex;gap:16px;margin-top:20px}
+.stat-box{text-align:center}
+.stat-box .sv{font-size:1.5rem;font-weight:800;color:#62F0B2}
+.stat-box .sl{font-size:.65rem;letter-spacing:1.5px;text-transform:uppercase;color:#8A877F;margin-top:2px}
+
+.tone-toggle{
+  position:fixed;bottom:16px;right:16px;z-index:8;
+  padding:8px 14px;background:rgba(10,11,16,.7);
+  backdrop-filter:blur(8px);border:1px solid rgba(98,240,178,.2);
+  border-radius:50px;color:#62F0B2;font-size:.72rem;font-weight:700;
+  cursor:pointer;transition:all .2s;
+}
+.tone-toggle:hover{background:rgba(98,240,178,.1)}
+.tone-toggle.on{background:rgba(98,240,178,.15);border-color:rgba(98,240,178,.4)}
+
+.brand-tag{
+  position:fixed;bottom:16px;left:16px;z-index:8;
+  font-size:.6rem;font-weight:700;letter-spacing:3px;
+  text-transform:uppercase;color:rgba(98,240,178,.3);
+}
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<!-- ── TITLE SCREEN ── -->
+<div class="overlay" id="titleScreen">
+  <div class="title">Resonance<br><span class="glow">Runner</span></div>
+  <div class="sub">432 Hz Endless Runner &middot; AnchorWithin</div>
+  <button class="mbtn" onclick="startGame()">&#9654;&ensp;Play</button>
+  <button class="mbtn secondary" onclick="toggle432()" id="toneBtn432">&#127925; Enable 432 Hz Tone</button>
+</div>
+
+<!-- ── GAME OVER ── -->
+<div class="overlay hidden" id="gameOver">
+  <div class="title" style="font-size:clamp(1.5rem,6vw,2.5rem)">Game Over</div>
+  <div class="stats-row">
+    <div class="stat-box"><div class="sv" id="finalScore">0</div><div class="sl">Score</div></div>
+    <div class="stat-box"><div class="sv" id="finalBest">0</div><div class="sl">Best</div></div>
+    <div class="stat-box"><div class="sv" id="finalOrbs">0</div><div class="sl">Orbs</div></div>
+  </div>
+  <button class="mbtn" onclick="startGame()">&#10227;&ensp;Play Again</button>
+  <button class="mbtn secondary" onclick="showTitle()">Menu</button>
+</div>
+
+<!-- ── HUD ── -->
+<div class="hud" id="hud" style="display:none">
+  <div class="hud-item"><div class="hud-label">Score</div><div class="hud-val" id="hudScore">0</div></div>
+  <div class="hud-item"><div class="hud-label">Best</div><div class="hud-val" id="hudBest">0</div></div>
+  <div class="hud-item"><div class="hud-label">Orbs</div><div class="hud-val" id="hudOrbs">0</div></div>
+</div>
+
+<div class="tone-toggle" id="toneBadge" style="display:none" onclick="toggle432()">&#127925; 432 Hz</div>
+<div class="brand-tag">AnchorWithin</div>
+
+<script>
+/* ═══════════════════════════════════════
+   SETUP
+   ═══════════════════════════════════════ */
+const C = document.getElementById('game');
+const ctx = C.getContext('2d');
+let W, H;
+
+function resize(){
+  W = C.width = window.innerWidth;
+  H = C.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+/* ═══════════════════════════════════════
+   432 Hz AUDIO
+   ═══════════════════════════════════════ */
+let audioCtx = null, osc = null, gainNode = null, toneOn = false;
+
+function toggle432(){
+  if(!toneOn) startTone(); else stopTone();
+  const btn = document.getElementById('toneBtn432');
+  const badge = document.getElementById('toneBadge');
+  if(toneOn){
+    btn.textContent = '\uD83C\uDFB5 432 Hz: ON';
+    badge.classList.add('on');
+    badge.textContent = '\uD83C\uDFB5 432 Hz ON';
+  } else {
+    btn.textContent = '\uD83C\uDFB5 Enable 432 Hz Tone';
+    badge.classList.remove('on');
+    badge.textContent = '\uD83C\uDFB5 432 Hz';
+  }
+}
+
+function startTone(){
+  if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended') audioCtx.resume();
+  osc = audioCtx.createOscillator();
+  osc.type='sine'; osc.frequency.value=432;
+  gainNode = audioCtx.createGain();
+  gainNode.gain.value=0;
+  osc.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+  osc.start();
+  gainNode.gain.setTargetAtTime(0.12, audioCtx.currentTime, 0.5);
+  toneOn=true;
+}
+
+function stopTone(){
+  if(gainNode) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.3);
+  setTimeout(()=>{try{osc.stop()}catch(e){}}, 600);
+  toneOn=false;
+}
+
+function playJumpSfx(){
+  if(!audioCtx) return;
+  const o=audioCtx.createOscillator();
+  const g=audioCtx.createGain();
+  o.type='sine';o.frequency.value=528;
+  g.gain.value=0.08;
+  o.connect(g);g.connect(audioCtx.destination);
+  o.start();
+  o.frequency.setTargetAtTime(660,audioCtx.currentTime,.08);
+  g.gain.setTargetAtTime(0,audioCtx.currentTime,.15);
+  setTimeout(()=>o.stop(),200);
+}
+
+function playOrbSfx(){
+  if(!audioCtx) return;
+  const o=audioCtx.createOscillator();
+  const g=audioCtx.createGain();
+  o.type='triangle';o.frequency.value=880;
+  g.gain.value=0.1;
+  o.connect(g);g.connect(audioCtx.destination);
+  o.start();
+  o.frequency.setTargetAtTime(1320,audioCtx.currentTime,.06);
+  g.gain.setTargetAtTime(0,audioCtx.currentTime,.12);
+  setTimeout(()=>o.stop(),200);
+}
+
+function playDeathSfx(){
+  if(!audioCtx) return;
+  const o=audioCtx.createOscillator();
+  const g=audioCtx.createGain();
+  o.type='sawtooth';o.frequency.value=200;
+  g.gain.value=0.1;
+  o.connect(g);g.connect(audioCtx.destination);
+  o.start();
+  o.frequency.setTargetAtTime(80,audioCtx.currentTime,.2);
+  g.gain.setTargetAtTime(0,audioCtx.currentTime,.3);
+  setTimeout(()=>o.stop(),400);
+}
+
+/* ═══════════════════════════════════════
+   GAME STATE
+   ═══════════════════════════════════════ */
+let state = 'title'; // title | playing | dead
+let score = 0, best = 0, orbs = 0;
+let speed = 4, gravity = 0.6, jumpForce = -13;
+let frameCount = 0;
+
+try{best=parseInt(localStorage.getItem('rr_best'))||0}catch(e){}
+
+// Player
+const player = {x:0,y:0,w:32,h:40,vy:0,grounded:false,jumpHeld:false,trail:[]};
+
+// World
+let platforms = [];
+let obstacles = [];
+let orbItems = [];
+let particles = [];
+let stars = [];
+let groundY = 0;
+
+/* ═══════════════════════════════════════
+   INIT
+   ═══════════════════════════════════════ */
+function initStars(){
+  stars=[];
+  for(let i=0;i<80;i++){
+    stars.push({
+      x:Math.random()*W,
+      y:Math.random()*H*.7,
+      r:Math.random()*1.5+.3,
+      a:Math.random()*.5+.2,
+      sp:Math.random()*.5+.2,
+    });
+  }
+}
+initStars();
+
+function resetGame(){
+  groundY = H - 80;
+  player.x = W * 0.2;
+  player.y = groundY - player.h;
+  player.vy = 0;
+  player.grounded = true;
+  player.trail = [];
+  score = 0; orbs = 0;
+  speed = 4.5;
+  frameCount = 0;
+  platforms = [];
+  obstacles = [];
+  orbItems = [];
+  particles = [];
+
+  // Initial platforms
+  for(let i=0;i<6;i++){
+    spawnObstacle(W + i * 300 + Math.random()*100);
+  }
+  for(let i=0;i<4;i++){
+    spawnOrb(W + 150 + i * 350 + Math.random()*150);
+  }
+}
+
+function spawnObstacle(x){
+  const types = ['spike','wall','gap'];
+  const type = types[Math.floor(Math.random()*types.length)];
+  if(type==='spike'){
+    obstacles.push({x,y:groundY-30,w:24,h:30,type:'spike'});
+  } else if(type==='wall'){
+    const h = 40 + Math.random()*30;
+    obstacles.push({x,y:groundY-h,w:20,h,type:'wall'});
+  } else {
+    // Double spike
+    obstacles.push({x,y:groundY-30,w:24,h:30,type:'spike'});
+    obstacles.push({x:x+40,y:groundY-30,w:24,h:30,type:'spike'});
+  }
+}
+
+function spawnOrb(x){
+  const y = groundY - 60 - Math.random()*80;
+  orbItems.push({x,y,r:10,alive:true,glow:0});
+}
+
+/* ═══════════════════════════════════════
+   INPUT
+   ═══════════════════════════════════════ */
+let jumpPressed = false;
+
+function doJump(){
+  if(state==='dead'){startGame();return;}
+  if(state!=='playing') return;
+  if(player.grounded){
+    player.vy = jumpForce;
+    player.grounded = false;
+    player.jumpHeld = true;
+    playJumpSfx();
+  }
+}
+
+function releaseJump(){
+  player.jumpHeld = false;
+  if(player.vy < -5) player.vy = -5; // Short hop
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();if(!jumpPressed){jumpPressed=true;doJump()}}
+});
+document.addEventListener('keyup',e=>{
+  if(e.code==='Space'||e.code==='ArrowUp'){jumpPressed=false;releaseJump()}
+});
+C.addEventListener('touchstart',e=>{e.preventDefault();doJump()},{passive:false});
+C.addEventListener('touchend',e=>{e.preventDefault();releaseJump()},{passive:false});
+C.addEventListener('mousedown',e=>{if(state==='playing')doJump()});
+C.addEventListener('mouseup',e=>{if(state==='playing')releaseJump()});
+
+/* ═══════════════════════════════════════
+   UPDATE
+   ═══════════════════════════════════════ */
+function update(){
+  if(state!=='playing') return;
+  frameCount++;
+
+  // Speed increase
+  speed = 4.5 + frameCount * 0.001;
+
+  // Player physics
+  player.vy += gravity;
+  if(player.jumpHeld && player.vy < 0) player.vy += gravity * -0.25; // Float
+  player.y += player.vy;
+
+  // Ground collision
+  if(player.y + player.h >= groundY){
+    player.y = groundY - player.h;
+    player.vy = 0;
+    player.grounded = true;
+  }
+
+  // Trail
+  player.trail.push({x:player.x+player.w/2, y:player.y+player.h/2, a:1});
+  if(player.trail.length > 12) player.trail.shift();
+  player.trail.forEach(t=>t.a*=0.85);
+
+  // Move obstacles
+  obstacles.forEach(o=>o.x-=speed);
+  obstacles = obstacles.filter(o=>o.x>-50);
+
+  // Spawn new obstacles
+  const lastObs = obstacles.length>0 ? Math.max(...obstacles.map(o=>o.x)) : 0;
+  if(lastObs < W){
+    spawnObstacle(W + 200 + Math.random()*200);
+  }
+
+  // Move orbs
+  orbItems.forEach(o=>{o.x-=speed; o.glow=(Math.sin(frameCount*.08)+1)*.5});
+  orbItems = orbItems.filter(o=>o.x>-30&&o.alive);
+
+  const lastOrb = orbItems.length>0 ? Math.max(...orbItems.map(o=>o.x)) : 0;
+  if(lastOrb < W - 100){
+    spawnOrb(W + 100 + Math.random()*200);
+  }
+
+  // Collision detection
+  const px=player.x+4, py=player.y+4, pw=player.w-8, ph=player.h-8;
+  for(const o of obstacles){
+    if(px<o.x+o.w && px+pw>o.x && py<o.y+o.h && py+ph>o.y){
+      die();
+      return;
+    }
+  }
+
+  // Orb collection
+  for(const o of orbItems){
+    if(!o.alive) continue;
+    const dx=player.x+player.w/2-o.x, dy=player.y+player.h/2-o.y;
+    if(Math.sqrt(dx*dx+dy*dy)<o.r+18){
+      o.alive=false;
+      orbs++;
+      playOrbSfx();
+      for(let i=0;i<8;i++){
+        particles.push({
+          x:o.x,y:o.y,
+          vx:(Math.random()-.5)*4,vy:(Math.random()-.5)*4,
+          r:2+Math.random()*2,a:1,color:'#62F0B2'
+        });
+      }
+    }
+  }
+
+  // Update particles
+  particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.a*=.92;p.r*=.96});
+  particles=particles.filter(p=>p.a>.05);
+
+  // Score
+  score = Math.floor(frameCount / 6);
+
+  // HUD
+  document.getElementById('hudScore').textContent = score;
+  document.getElementById('hudOrbs').textContent = orbs;
+}
+
+function die(){
+  state='dead';
+  playDeathSfx();
+  if(score>best){best=score;try{localStorage.setItem('rr_best',best)}catch(e){}}
+  document.getElementById('hudBest').textContent = best;
+
+  // Death particles
+  for(let i=0;i<20;i++){
+    particles.push({
+      x:player.x+player.w/2,y:player.y+player.h/2,
+      vx:(Math.random()-.5)*8,vy:(Math.random()-.5)*8,
+      r:2+Math.random()*3,a:1,color:'#FF6B6B'
+    });
+  }
+
+  setTimeout(()=>{
+    document.getElementById('finalScore').textContent=score;
+    document.getElementById('finalBest').textContent=best;
+    document.getElementById('finalOrbs').textContent=orbs;
+    document.getElementById('gameOver').classList.remove('hidden');
+    document.getElementById('hud').style.display='none';
+  },600);
+}
+
+/* ═══════════════════════════════════════
+   DRAW
+   ═══════════════════════════════════════ */
+function draw(){
+  ctx.fillStyle='#0A0B10';
+  ctx.fillRect(0,0,W,H);
+
+  // Stars
+  stars.forEach(s=>{
+    if(state==='playing') s.x -= s.sp * 0.5;
+    if(s.x<0) s.x=W;
+    const flicker = s.a + Math.sin(frameCount*.02+s.x)*0.15;
+    ctx.beginPath();
+    ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+    ctx.fillStyle=`rgba(200,210,230,${flicker})`;
+    ctx.fill();
+  });
+
+  // Mountains (parallax)
+  drawMountains();
+
+  // Ground
+  const gGrad = ctx.createLinearGradient(0,groundY,0,H);
+  gGrad.addColorStop(0,'#1A1E2E');
+  gGrad.addColorStop(1,'#0E1018');
+  ctx.fillStyle=gGrad;
+  ctx.fillRect(0,groundY,W,H-groundY);
+
+  // Ground line
+  ctx.strokeStyle='rgba(98,240,178,0.15)';
+  ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(0,groundY);ctx.lineTo(W,groundY);ctx.stroke();
+
+  // Ground grid lines
+  ctx.strokeStyle='rgba(98,240,178,0.04)';
+  const gridOffset = state==='playing'?(frameCount*speed)%40:0;
+  for(let x=-gridOffset;x<W;x+=40){
+    ctx.beginPath();ctx.moveTo(x,groundY);ctx.lineTo(x+20,H);ctx.stroke();
+  }
+
+  // Player trail
+  player.trail.forEach(t=>{
+    ctx.beginPath();
+    ctx.arc(t.x,t.y,4,0,Math.PI*2);
+    ctx.fillStyle=`rgba(98,240,178,${t.a*0.3})`;
+    ctx.fill();
+  });
+
+  // Player
+  drawPlayer();
+
+  // Obstacles
+  obstacles.forEach(o=>{
+    if(o.type==='spike'){
+      ctx.fillStyle='#FF6B6B';
+      ctx.beginPath();
+      ctx.moveTo(o.x,o.y+o.h);
+      ctx.lineTo(o.x+o.w/2,o.y);
+      ctx.lineTo(o.x+o.w,o.y+o.h);
+      ctx.closePath();
+      ctx.fill();
+      // Glow
+      ctx.shadowColor='#FF6B6B';ctx.shadowBlur=8;
+      ctx.fill();
+      ctx.shadowBlur=0;
+    } else {
+      ctx.fillStyle='#FF6B6B';
+      const rr=4;
+      ctx.beginPath();
+      ctx.moveTo(o.x+rr,o.y);ctx.lineTo(o.x+o.w-rr,o.y);
+      ctx.quadraticCurveTo(o.x+o.w,o.y,o.x+o.w,o.y+rr);
+      ctx.lineTo(o.x+o.w,o.y+o.h);ctx.lineTo(o.x,o.y+o.h);
+      ctx.lineTo(o.x,o.y+rr);
+      ctx.quadraticCurveTo(o.x,o.y,o.x+rr,o.y);
+      ctx.fill();
+    }
+  });
+
+  // Orbs
+  orbItems.forEach(o=>{
+    if(!o.alive) return;
+    const g = o.glow||0;
+    ctx.shadowColor='#62F0B2';ctx.shadowBlur=10+g*6;
+    ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);
+    ctx.fillStyle=`rgba(98,240,178,${0.7+g*0.3})`;
+    ctx.fill();
+    ctx.shadowBlur=0;
+    // Inner
+    ctx.beginPath();ctx.arc(o.x,o.y,o.r*.5,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,0.6)';ctx.fill();
+  });
+
+  // Particles
+  particles.forEach(p=>{
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    ctx.fillStyle=p.color.replace(')',`,${p.a})`).replace('rgb','rgba');
+    ctx.fill();
+  });
+}
+
+function drawPlayer(){
+  const p = player;
+  const breathe = Math.sin(frameCount*.1)*1.5;
+  const lean = state==='playing'?Math.min(speed*.3,3):0;
+
+  ctx.save();
+  ctx.translate(p.x+p.w/2, p.y+p.h/2);
+  ctx.rotate(lean*Math.PI/180);
+
+  // Body
+  ctx.fillStyle='#62F0B2';
+  ctx.shadowColor='#62F0B2';ctx.shadowBlur=12;
+  roundRect(ctx,-p.w/2,-p.h/2+breathe,p.w,p.h-4,8);
+  ctx.fill();
+  ctx.shadowBlur=0;
+
+  // Eye
+  ctx.fillStyle='#0A0B10';
+  ctx.beginPath();
+  ctx.arc(4,-6+breathe,4,0,Math.PI*2);
+  ctx.fill();
+
+  // Eye shine
+  ctx.fillStyle='#fff';
+  ctx.beginPath();
+  ctx.arc(5.5,-7.5+breathe,1.5,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawMountains(){
+  const offset = state==='playing'?frameCount*0.3:0;
+
+  ctx.fillStyle='#0F1320';
+  ctx.beginPath();ctx.moveTo(0,groundY);
+  for(let x=0;x<=W;x+=60){
+    ctx.lineTo(x, groundY - 30 - Math.sin((x+offset)*0.008)*40 - Math.sin((x+offset)*0.003)*25);
+  }
+  ctx.lineTo(W,groundY);ctx.closePath();ctx.fill();
+
+  ctx.fillStyle='#0D1018';
+  ctx.beginPath();ctx.moveTo(0,groundY);
+  for(let x=0;x<=W;x+=40){
+    ctx.lineTo(x, groundY - 15 - Math.sin((x+offset*1.5)*0.012)*30);
+  }
+  ctx.lineTo(W,groundY);ctx.closePath();ctx.fill();
+}
+
+function roundRect(c,x,y,w,h,r){
+  c.beginPath();
+  c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);
+  c.lineTo(x+w,y+h-r);c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  c.lineTo(x+r,y+h);c.quadraticCurveTo(x,y+h,x,y+h-r);
+  c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y);
+  c.closePath();
+}
+
+/* ═══════════════════════════════════════
+   GAME LOOP
+   ═══════════════════════════════════════ */
+function loop(){
+  update();
+  draw();
+  // Update particles in title/dead too
+  if(state!=='playing'){
+    particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.a*=.92;p.r*=.96});
+    particles=particles.filter(p=>p.a>.05);
+  }
+  requestAnimationFrame(loop);
+}
+
+/* ═══════════════════════════════════════
+   SCREEN MANAGEMENT
+   ═══════════════════════════════════════ */
+function startGame(){
+  document.getElementById('titleScreen').classList.add('hidden');
+  document.getElementById('gameOver').classList.add('hidden');
+  document.getElementById('hud').style.display='flex';
+  document.getElementById('toneBadge').style.display='block';
+  document.getElementById('hudBest').textContent=best;
+
+  resetGame();
+  state='playing';
+}
+
+function showTitle(){
+  document.getElementById('gameOver').classList.add('hidden');
+  document.getElementById('titleScreen').classList.remove('hidden');
+  document.getElementById('hud').style.display='none';
+  state='title';
+}
+
+// Idle animation for title screen
+function idleDraw(){
+  groundY = H - 80;
+  player.x = W*0.2;
+  player.y = groundY - player.h + Math.sin(Date.now()*.003)*5;
+}
+
+// Init and start loop
+resetGame();
+document.getElementById('hudBest').textContent=best;
+loop();
+
+// Keep drawing idle player on title
+setInterval(()=>{if(state!=='playing')idleDraw()},16);
+</script>
+</body>
+</html>
